@@ -8,99 +8,8 @@ from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-
-# =========================================================
-# Constantes : compétences et pondérations par poste
-# =========================================================
-
-SKILLS = [
-    "Conduite de balle",
-    "Dribble",
-    "Passes courtes",
-    "Passes longues",
-    "Contrôle orienté",
-    "Tir",
-    "Vitesse",
-    "Agilité",
-    "Endurance",
-    "Intelligence de jeu",
-    "Placement",
-    "Jeu collectif",
-    "Engagement",
-    "Leadership",
-    "Attitude / Comportement",
-]
-
-POSITION_WEIGHTS = {
-    "Gardien": {
-        "Conduite de balle": 1,
-        "Dribble": 1,
-        "Passes courtes": 3,
-        "Passes longues": 2,
-        "Contrôle orienté": 3,
-        "Tir": 1,
-        "Vitesse": 3,
-        "Agilité": 3,
-        "Endurance": 2,
-        "Intelligence de jeu": 2,
-        "Placement": 3,
-        "Jeu collectif": 2,
-        "Engagement": 0,
-        "Leadership": 0,
-        "Attitude / Comportement": 4,
-    },
-    "Défenseur": {
-        "Conduite de balle": 2,
-        "Dribble": 2,
-        "Passes courtes": 4,
-        "Passes longues": 3,
-        "Contrôle orienté": 4,
-        "Tir": 2,
-        "Vitesse": 4,
-        "Agilité": 3,
-        "Endurance": 3,
-        "Intelligence de jeu": 3,
-        "Placement": 5,
-        "Jeu collectif": 3,
-        "Engagement": 0,
-        "Leadership": 0,
-        "Attitude / Comportement": 4,
-    },
-    "Milieu": {
-        "Conduite de balle": 3,
-        "Dribble": 3,
-        "Passes courtes": 5,
-        "Passes longues": 3,
-        "Contrôle orienté": 5,
-        "Tir": 3,
-        "Vitesse": 3,
-        "Agilité": 4,
-        "Endurance": 5,
-        "Intelligence de jeu": 5,
-        "Placement": 4,
-        "Jeu collectif": 5,
-        "Engagement": 0,
-        "Leadership": 0,
-        "Attitude / Comportement": 4,
-    },
-    "Attaquant": {
-        "Conduite de balle": 3,
-        "Dribble": 4,
-        "Passes courtes": 3,
-        "Passes longues": 2,
-        "Contrôle orienté": 4,
-        "Tir": 5,
-        "Vitesse": 5,
-        "Agilité": 4,
-        "Endurance": 3,
-        "Intelligence de jeu": 3,
-        "Placement": 3,
-        "Jeu collectif": 3,
-        "Engagement": 0,
-        "Leadership": 0,
-        "Attitude / Comportement": 4,
-    },
-}
+from core.constants import POSITION_WEIGHTS, SKILLS
+from core.models import best_position_from_scores, compute_position_scores
 
 DATA_FILE = Path("u9_data.json")
 
@@ -205,24 +114,6 @@ def find_training(data, training_id):  # NEW
             return t
     return None
 
-
-# =========================================================
-# Calculs de profils par poste
-# =========================================================
-
-def compute_position_scores(player):
-    ratings = player.get("base_ratings", {})
-    scores = {}
-    for pos, weights in POSITION_WEIGHTS.items():
-        num = 0
-        den = 0
-        for skill, w in weights.items():
-            note = ratings.get(skill)
-            if note is not None and w > 0:
-                num += note * w
-                den += w
-        scores[pos] = round(num / den, 2) if den > 0 else None
-    return scores
 
 def generate_player_pdf(player, data):
     """
@@ -346,14 +237,6 @@ def generate_player_pdf(player, data):
     c.save()
     buffer.seek(0)
     return buffer.getvalue()
-
-
-def best_position_from_scores(scores):
-    valid = {k: v for k, v in scores.items() if v is not None}
-    if not valid:
-        return None
-    return max(valid, key=valid.get)
-
 
 # =========================================================
 # UI – Joueurs
