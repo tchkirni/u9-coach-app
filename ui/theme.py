@@ -40,6 +40,13 @@ def apply_mobile_theme():
             padding-bottom: 0.3rem;
             line-height: 1.4 !important;  /* évite que le texte soit "coupé" visuellement */
         }
+        /* Garde le texte centré et non coupé dans la valeur sélectionnée */
+        .stSelectbox [data-baseweb="select"] > div {
+            min-height: 2.9rem;
+            padding-top: 0.35rem;
+            padding-bottom: 0.35rem;
+            align-items: center;
+        }
 
         /* Sliders un peu plus “touch friendly” */
         .stSlider > div[data-baseweb="slider"] {
