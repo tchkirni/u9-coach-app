@@ -1,7 +1,5 @@
 import streamlit as st
 import pandas as pd
-import json
-from pathlib import Path
 from datetime import date, datetime, timedelta
 
 from io import BytesIO
@@ -10,8 +8,7 @@ from reportlab.pdfgen import canvas
 
 from core.constants import POSITION_WEIGHTS, SKILLS
 from core.models import best_position_from_scores, compute_position_scores
-
-DATA_FILE = Path("u9_data.json")
+from storage import repository as repo
 
 def apply_mobile_theme():
     """Ajuste le style pour une utilisation mobile (gros boutons, champs lisibles)."""
@@ -60,60 +57,6 @@ def apply_mobile_theme():
         """,
         unsafe_allow_html=True,
     )
-
-# =========================================================
-# Fonctions de persistance
-# =========================================================
-
-def load_data():
-    if DATA_FILE.exists():
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    else:
-        data = {}
-
-    # Sécurisation des structures (pour compatibilité avec anciennes versions)
-    if "players" not in data:
-        data["players"] = []
-    if "matches" not in data:
-        data["matches"] = []
-    if "trainings" not in data:  # NEW
-        data["trainings"] = []
-
-    return data
-
-
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def get_next_id(items):
-    if not items:
-        return 1
-    return max(item["id"] for item in items) + 1
-
-
-def find_player(data, player_id):
-    for p in data["players"]:
-        if p["id"] == player_id:
-            return p
-    return None
-
-
-def find_match(data, match_id):
-    for m in data["matches"]:
-        if m["id"] == match_id:
-            return m
-    return None
-
-
-def find_training(data, training_id):  # NEW
-    for t in data["trainings"]:
-        if t["id"] == training_id:
-            return t
-    return None
-
 
 def generate_player_pdf(player, data):
     """
@@ -242,7 +185,7 @@ def generate_player_pdf(player, data):
 # UI – Joueurs
 # =========================================================
 
-def page_players(data):
+def page_players(repo, data):
     st.header("👥 Gestion des joueurs")
 
     with st.form("add_player"):
@@ -258,7 +201,7 @@ def page_players(data):
 
     if submit and name.strip():
         new_player = {
-            "id": get_next_id(data["players"]),
+            "id": repo.get_next_id(data["players"]),
             "name": name.strip(),
             "birth_year": int(birth_year),
             "preferred_position": preferred_position or None,
@@ -266,7 +209,7 @@ def page_players(data):
             "base_ratings": {},
         }
         data["players"].append(new_player)
-        save_data(data)
+        repo.save_data(data)
         st.success(f"Joueur '{name}' ajouté.")
 
     if data["players"]:
@@ -290,7 +233,7 @@ def page_players(data):
 # UI – Profil technique
 # =========================================================
 
-def page_base_ratings(data):
+def page_base_ratings(repo, data):
     st.header("📊 Profil technique / physique / tactique / mental")
 
     if not data["players"]:
@@ -299,7 +242,7 @@ def page_base_ratings(data):
 
     player_names = {p["name"]: p["id"] for p in data["players"]}
     selected_name = st.selectbox("Choisir un joueur", list(player_names.keys()))
-    player = find_player(data, player_names[selected_name])
+    player = repo.find_player(data, player_names[selected_name])
 
     st.subheader(f"Notes de base – {player['name']}")
 
@@ -314,7 +257,7 @@ def page_base_ratings(data):
 
     if st.button("💾 Enregistrer les notes"):
         player["base_ratings"] = new_ratings
-        save_data(data)
+        repo.save_data(data)
         st.success("Profil mis à jour.")
 
     if player.get("base_ratings"):
@@ -330,7 +273,7 @@ def page_base_ratings(data):
 # UI – Entraînements (NEW)
 # =========================================================
 
-def page_trainings(data):
+def page_trainings(repo, data):
     st.header("🏋️ Entraînements")
 
     if not data["players"]:
@@ -352,7 +295,7 @@ def page_trainings(data):
 
     if submit_training and theme.strip():
         new_training = {
-            "id": get_next_id(data["trainings"]),
+            "id": repo.get_next_id(data["trainings"]),
             "date": t_date.isoformat(),
             "theme": theme.strip(),
             "type": t_type,
@@ -360,7 +303,7 @@ def page_trainings(data):
             "attendances": [],  # une entrée par joueur
         }
         data["trainings"].append(new_training)
-        save_data(data)
+        repo.save_data(data)
         st.success(f"Séance du {t_date} créée.")
 
     if not data["trainings"]:
@@ -375,7 +318,7 @@ def page_trainings(data):
         for t in sorted(data["trainings"], key=lambda x: x["date"], reverse=True)
     }
     selected_label = st.selectbox("Choisir une séance", list(training_options.keys()))
-    training = find_training(data, training_options[selected_label])
+    training = repo.find_training(data, training_options[selected_label])
 
     st.markdown(f"**Date :** {training['date']}  \n**Thème :** {training['theme']}  \n**Type :** {training['type']}")
     if training.get("notes"):
@@ -435,7 +378,7 @@ def page_trainings(data):
                 }
             )
         training["attendances"] = new_attendances
-        save_data(data)
+        repo.save_data(data)
         st.success("Séance mise à jour.")
 
     # Tableau récap
@@ -444,7 +387,7 @@ def page_trainings(data):
 
         table_rows = []
         for att in training["attendances"]:
-            p = find_player(data, att["player_id"])
+            p = repo.find_player(data, att["player_id"])
             table_rows.append(
                 {
                     "Joueur": p["name"] if p else "Inconnu",
@@ -462,7 +405,7 @@ def page_trainings(data):
 # UI – Matchs
 # =========================================================
 
-def page_matches(data):
+def page_matches(repo, data):
     st.header("🏟️ Matchs & performances")
     mobile_mode = st.session_state.get("mobile_mode", False)
 
@@ -484,14 +427,14 @@ def page_matches(data):
 
     if submit_match and opponent.strip():
         new_match = {
-            "id": get_next_id(data["matches"]),
+            "id": repo.get_next_id(data["matches"]),
             "date": m_date.isoformat(),
             "opponent": opponent.strip(),
             "competition": competition.strip(),
             "performances": [],
         }
         data["matches"].append(new_match)
-        save_data(data)
+        repo.save_data(data)
         st.success(f"Match vs {opponent} ajouté.")
 
     if not data["matches"]:
@@ -505,7 +448,7 @@ def page_matches(data):
         for m in sorted(data["matches"], key=lambda x: x["date"], reverse=True)
     }
     selected_match_label = st.selectbox("Choisir un match", list(match_options.keys()))
-    match = find_match(data, match_options[selected_match_label])
+    match = repo.find_match(data, match_options[selected_match_label])
 
     if not data["players"]:
         st.warning("Ajoute des joueurs avant de saisir des performances.")
@@ -516,7 +459,7 @@ def page_matches(data):
 
     player_names = {p["name"]: p["id"] for p in data["players"]}
     perf_player_name = st.selectbox("Joueur", list(player_names.keys()))
-    perf_player = find_player(data, player_names[perf_player_name])
+    perf_player = repo.find_player(data, player_names[perf_player_name])
 
     col1, col2 = st.columns(2)
     with col1:
@@ -546,14 +489,14 @@ def page_matches(data):
             "comment": comment.strip(),
         }
         match["performances"].append(perf)
-        save_data(data)
+        repo.save_data(data)
         st.success(f"Performance ajoutée pour {perf_player['name']}.")
 
     if match["performances"]:
         st.subheader("Performances déjà saisies pour ce match")
         rows = []
         for perf in match["performances"]:
-            p = find_player(data, perf["player_id"])
+            p = repo.find_player(data, perf["player_id"])
             rows.append({
                 "Joueur": p["name"] if p else "Inconnu",
                 "Poste": perf["position"],
@@ -574,13 +517,13 @@ def page_matches(data):
 # UI – Stats & Profils
 # =========================================================
 
-def get_all_match_performances(data):
+def get_all_match_performances(repo, data):
     """Retourne un DataFrame avec toutes les perfs de match, une ligne par joueur/match."""
     rows = []
     for m in data.get("matches", []):
         match_date = datetime.fromisoformat(m["date"]).date()
         for perf in m.get("performances", []):
-            p = find_player(data, perf["player_id"])
+            p = repo.find_player(data, perf["player_id"])
             if not p:
                 continue
             overall = (perf["tech"] + perf["phys"] + perf["tact"] + perf["mental"]) / 4
@@ -605,7 +548,7 @@ def get_all_match_performances(data):
     return pd.DataFrame(rows)
 
 
-def page_stats(data):
+def page_stats(repo, data):
     st.header("📈 Stats & profils")
 
     if not data["players"]:
@@ -635,7 +578,7 @@ def page_stats(data):
     all_perfs = []
     for m in data["matches"]:
         for perf in m["performances"]:
-            p = find_player(data, perf["player_id"])
+            p = repo.find_player(data, perf["player_id"])
             if not p:
                 continue
             all_perfs.append({
@@ -674,7 +617,7 @@ def page_stats(data):
     selected_name = st.selectbox("Choisir un joueur pour générer sa fiche PDF", list(player_names.keys()))
 
     if st.button("Générer la fiche PDF"):
-        player = find_player(data, player_names[selected_name])
+        player = repo.find_player(data, player_names[selected_name])
         pdf_bytes = generate_player_pdf(player, data)
         file_name = f"Fiche_{player['name'].replace(' ', '_')}.pdf"
 
@@ -685,10 +628,10 @@ def page_stats(data):
             mime="application/pdf"
         )
 
-def page_coach_dashboard(data):
+def page_coach_dashboard(repo, data):
     st.header("📊 Dashboard Coach")
 
-    df_all = get_all_match_performances(data)
+    df_all = get_all_match_performances(repo, data)
     if df_all.empty:
         st.info("Aucune performance de match saisie pour le moment.")
         return
@@ -794,7 +737,7 @@ def main():
 
     st.title("⚽ Suivi U9 – Joueurs, Entraînements, Matchs & Profils postes")
 
-    data = load_data()
+    data = repo.load_data()
 
    
     mobile_mode = st.sidebar.checkbox("Mode mobile (terrain)", value=True)
@@ -808,17 +751,17 @@ def main():
 
 
     if page == "Joueurs":
-        page_players(data)
+        page_players(repo, data)
     elif page == "Profil technique":
-        page_base_ratings(data)
+        page_base_ratings(repo, data)
     elif page == "Entraînements":
-        page_trainings(data)
+        page_trainings(repo, data)
     elif page == "Matchs":
-        page_matches(data)
+        page_matches(repo, data)
     elif page == "Stats & Profils":
-        page_stats(data)
+        page_stats(repo, data)
     elif page == "Dashboard Coach":
-        page_coach_dashboard(data)
+        page_coach_dashboard(repo, data)
 
 
 if __name__ == "__main__":
