@@ -1,13 +1,18 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime, timedelta
-
-from io import BytesIO
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
+from datetime import date
 
 from core.constants import POSITION_WEIGHTS, SKILLS
 from core.models import best_position_from_scores, compute_position_scores
+from services.analytics import (
+    aggregate_match_means,
+    aggregate_minutes,
+    build_profile_rows,
+    compute_progress_deltas,
+    get_all_match_performances,
+    top_three_for_match,
+)
+from services.reports import generate_player_pdf
 from storage import repository as repo
 
 def apply_mobile_theme():
@@ -57,129 +62,6 @@ def apply_mobile_theme():
         """,
         unsafe_allow_html=True,
     )
-
-def generate_player_pdf(player, data):
-    """
-    Génère un PDF (en mémoire) avec la fiche complète du joueur.
-    Retourne un bytes (ready pour st.download_button).
-    """
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-
-    # Marges & position de départ
-    x_margin = 40
-    y = height - 50
-
-    def line(text, size=10, bold=False, dy=14):
-        nonlocal y
-        if y < 60:  # nouvelle page si trop bas
-            c.showPage()
-            y = height - 50
-        if bold:
-            c.setFont("Helvetica-Bold", size)
-        else:
-            c.setFont("Helvetica", size)
-        c.drawString(x_margin, y, text)
-        y -= dy
-
-    # ========= En-tête =========
-    line("FICHE JOUEUR – U9", size=16, bold=True, dy=22)
-    line(f"Nom : {player.get('name', '')}", size=12, bold=True)
-    line(f"Année de naissance : {player.get('birth_year', '')}", size=10)
-    line(f"Poste préférentiel (déclaré) : {player.get('preferred_position', '')}", size=10)
-    line(f"Pied fort : {player.get('foot', '')}", size=10)
-    line(" ", dy=10)
-
-    # ========= Profil de base =========
-    base = player.get("base_ratings", {})
-    line("Profil technique / physique / tactique / mental", size=12, bold=True, dy=18)
-    if not base:
-        line("Aucune note de base saisie pour l’instant.", size=10)
-    else:
-        for skill in SKILLS:
-            val = base.get(skill)
-            if val is not None:
-                line(f"{skill} : {val}/5", size=10)
-
-    line(" ", dy=10)
-
-    # ========= Profils par poste =========
-    scores = compute_position_scores(player)
-    best_pos = best_position_from_scores(scores)
-    line("Profil par poste (pondéré)", size=12, bold=True, dy=18)
-    if scores:
-        for pos in ["Gardien", "Défenseur", "Milieu", "Attaquant"]:
-            sc = scores.get(pos)
-            if sc is not None:
-                line(f"{pos} : {sc}/5", size=10)
-    if best_pos:
-        line(f"➡ Poste recommandé : {best_pos}", size=11, bold=True, dy=16)
-
-    line(" ", dy=10)
-
-    # ========= Stats Entraînements =========
-    # Présence, effort, concentration
-    attendances = []
-    for t in data.get("trainings", []):
-        for att in t.get("attendances", []):
-            if att.get("player_id") == player["id"]:
-                attendances.append(att)
-
-    line("Entraînements", size=12, bold=True, dy=18)
-    if attendances:
-        total_sessions = len(attendances)
-        present_sessions = sum(1 for a in attendances if a.get("present"))
-        avg_effort = round(sum(a.get("effort", 0) for a in attendances) / total_sessions, 2)
-        avg_focus = round(sum(a.get("focus", 0) for a in attendances) / total_sessions, 2)
-        line(f"Séances suivies : {present_sessions} / {total_sessions}", size=10)
-        line(f"Effort moyen : {avg_effort}/5", size=10)
-        line(f"Concentration moyenne : {avg_focus}/5", size=10)
-    else:
-        line("Aucune séance renseignée pour ce joueur.", size=10)
-
-    line(" ", dy=10)
-
-    # ========= Stats Matchs =========
-    perfs = []
-    for m in data.get("matches", []):
-        for perf in m.get("performances", []):
-            if perf.get("player_id") == player["id"]:
-                perfs.append(perf)
-
-    line("Matchs", size=12, bold=True, dy=18)
-    if perfs:
-        dfp = pd.DataFrame(perfs)
-        avg_tech = round(dfp["tech"].mean(), 2)
-        avg_phys = round(dfp["phys"].mean(), 2)
-        avg_tact = round(dfp["tact"].mean(), 2)
-        avg_mental = round(dfp["mental"].mean(), 2)
-        total_goals = int(dfp["goals"].sum())
-        total_assists = int(dfp["assists"].sum())
-
-        line(f"Nombre de feuilles de match : {len(perfs)}", size=10)
-        line(f"Tech / Phys / Tact / Mental (moyennes) : {avg_tech} / {avg_phys} / {avg_tact} / {avg_mental}", size=10)
-        line(f"Buts : {total_goals}  |  Passes décisives : {total_assists}", size=10)
-    else:
-        line("Aucune performance de match saisie pour ce joueur.", size=10)
-
-    line(" ", dy=10)
-
-    # ========= Espace pour coach =========
-    line("Zone coach – Points forts :", size=11, bold=True, dy=18)
-    line("________________________________________", size=10)
-    line("________________________________________", size=10)
-    line("________________________________________", size=10)
-    line(" ", dy=8)
-    line("Zone coach – Axes de progression :", size=11, bold=True, dy=18)
-    line("________________________________________", size=10)
-    line("________________________________________", size=10)
-    line("________________________________________", size=10)
-
-    c.showPage()
-    c.save()
-    buffer.seek(0)
-    return buffer.getvalue()
 
 # =========================================================
 # UI – Joueurs
@@ -517,37 +399,6 @@ def page_matches(repo, data):
 # UI – Stats & Profils
 # =========================================================
 
-def get_all_match_performances(repo, data):
-    """Retourne un DataFrame avec toutes les perfs de match, une ligne par joueur/match."""
-    rows = []
-    for m in data.get("matches", []):
-        match_date = datetime.fromisoformat(m["date"]).date()
-        for perf in m.get("performances", []):
-            p = repo.find_player(data, perf["player_id"])
-            if not p:
-                continue
-            overall = (perf["tech"] + perf["phys"] + perf["tact"] + perf["mental"]) / 4
-            rows.append({
-                "Joueur": p["name"],
-                "player_id": p["id"],
-                "date": match_date,
-                "overall": overall,
-                "Tech": perf["tech"],
-                "Phys": perf["phys"],
-                "Tact": perf["tact"],
-                "Mental": perf["mental"],
-                "Minutes": perf["minutes"],
-                "Buts": perf["goals"],
-                "Passes": perf["assists"],
-                "match_id": m["id"],
-                "adversaire": m["opponent"],
-                "competition": m["competition"],
-            })
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows)
-
-
 def page_stats(repo, data):
     st.header("📈 Stats & profils")
 
@@ -555,59 +406,20 @@ def page_stats(repo, data):
         st.warning("Aucun joueur.")
         return
 
-    # Profils par poste (notes de base)
-    rows = []
-    for p in data["players"]:
-        scores = compute_position_scores(p)
-        best_pos = best_position_from_scores(scores)
-        row = {
-            "Nom": p["name"],
-            "Poste préf. (déclaré)": p.get("preferred_position") or "",
-            "Poste recommandé (profil)": best_pos or "",
-        }
-        if scores:
-            for pos in ["Gardien", "Défenseur", "Milieu", "Attaquant"]:
-                row[f"Score {pos}"] = scores.get(pos)
-        rows.append(row)
-
+    rows = build_profile_rows(data)
     df_profiles = pd.DataFrame(rows)
     st.subheader("Profils postes (profil de base)")
     st.dataframe(df_profiles, use_container_width=True)
 
-    # Stats de match
-    all_perfs = []
-    for m in data["matches"]:
-        for perf in m["performances"]:
-            p = repo.find_player(data, perf["player_id"])
-            if not p:
-                continue
-            all_perfs.append({
-                "Joueur": p["name"],
-                "Tech": perf["tech"],
-                "Phys": perf["phys"],
-                "Tact": perf["tact"],
-                "Mental": perf["mental"],
-                "Buts": perf["goals"],
-                "Passes": perf["assists"],
-            })
-
-    if all_perfs:
-        dfp = pd.DataFrame(all_perfs)
+    agg = aggregate_match_means(data)
+    if agg.empty:
+        st.info("Aucune performance de match saisie pour le moment.")
+    else:
         st.subheader("Moyennes de match par joueur")
-        agg = dfp.groupby("Joueur").agg({
-            "Tech": "mean",
-            "Phys": "mean",
-            "Tact": "mean",
-            "Mental": "mean",
-            "Buts": "sum",
-            "Passes": "sum",
-        }).round(2)
         st.dataframe(agg, use_container_width=True)
 
         st.subheader("Visualisation rapide – moyenne technique")
         st.bar_chart(agg["Tech"])
-    else:
-        st.info("Aucune performance de match saisie pour le moment.")
 
     # --------- Fiche joueur PDF ---------
     st.markdown("---")
@@ -631,7 +443,7 @@ def page_stats(repo, data):
 def page_coach_dashboard(repo, data):
     st.header("📊 Dashboard Coach")
 
-    df_all = get_all_match_performances(repo, data)
+    df_all = get_all_match_performances(data)
     if df_all.empty:
         st.info("Aucune performance de match saisie pour le moment.")
         return
@@ -640,58 +452,27 @@ def page_coach_dashboard(repo, data):
     if not isinstance(df_all["date"].iloc[0], date):
         df_all["date"] = pd.to_datetime(df_all["date"]).dt.date
 
-    today = date.today()
-    recent_start = today - timedelta(days=30)
-    prev_start = today - timedelta(days=60)
-
-    # -------- Joueurs en progression / difficulté (delta notes vs dernier mois) --------
     st.subheader("Joueurs en progression / en difficulté (30j vs 30–60j)")
 
-    df_recent = df_all[df_all["date"] >= recent_start]
-    df_prev = df_all[(df_all["date"] < recent_start) & (df_all["date"] >= prev_start)]
+    df_delta, top_up, top_down = compute_progress_deltas(df_all)
 
-    if df_recent.empty or df_prev.empty:
+    if top_up.empty and top_down.empty:
         st.info("Pas assez de données pour comparer les 30 derniers jours aux 30 jours précédents.")
     else:
-        recent_mean = df_recent.groupby("Joueur")["overall"].mean()
-        prev_mean = df_prev.groupby("Joueur")["overall"].mean()
-
-        df_delta = pd.DataFrame({
-            "Note 30 derniers jours": recent_mean,
-            "Note 30–60 jours": prev_mean,
-        }).dropna()
-
-        if not df_delta.empty:
-            df_delta["Delta"] = (df_delta["Note 30 derniers jours"]
-                                 - df_delta["Note 30–60 jours"]).round(2)
-
-            # Joueurs en progression (delta positif, triés décroissant)
-            top_up = df_delta.sort_values("Delta", ascending=False).head(5)
-            # Joueurs en difficulté (delta négatif, triés croissant)
-            top_down = df_delta.sort_values("Delta", ascending=True).head(5)
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("### 📈 Joueurs en progression")
-                st.dataframe(top_up, use_container_width=True)
-            with col2:
-                st.markdown("### 📉 Joueurs en difficulté")
-                st.dataframe(top_down, use_container_width=True)
-        else:
-            st.info("Pas assez de joueurs ayant des matchs dans les deux périodes.")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("### 📈 Joueurs en progression")
+            st.dataframe(top_up, use_container_width=True)
+        with col2:
+            st.markdown("### 📉 Joueurs en difficulté")
+            st.dataframe(top_down, use_container_width=True)
 
     st.markdown("---")
 
     # -------- Temps de jeu total / charge physique --------
     st.subheader("⏱️ Temps de jeu & charge de travail")
 
-    agg_minutes = df_all.groupby("Joueur").agg(
-        Matches=("overall", "count"),
-        Minutes_totales=("Minutes", "sum"),
-    )
-    agg_minutes["Minutes / match"] = (agg_minutes["Minutes_totales"]
-                                      / agg_minutes["Matches"]).round(1)
-
+    agg_minutes = aggregate_minutes(df_all)
     st.dataframe(agg_minutes.sort_values("Minutes_totales", ascending=False),
                  use_container_width=True)
 
@@ -715,15 +496,10 @@ def page_coach_dashboard(repo, data):
     selected_match_label = st.selectbox("Choisir un match", list(match_labels.keys()))
     selected_match_id = match_labels[selected_match_label]
 
-    df_match = df_all[df_all["match_id"] == selected_match_id].copy()
-    if df_match.empty:
+    top3 = top_three_for_match(df_all, selected_match_id)
+    if top3.empty:
         st.info("Aucune performance enregistrée pour ce match.")
         return
-
-    df_match["Note globale"] = df_match["overall"].round(2)
-    top3 = df_match.sort_values("Note globale", ascending=False).head(3)[
-        ["Joueur", "Note globale", "Minutes", "Buts", "Passes"]
-    ]
     st.table(top3.set_index("Joueur"))
 
 # =========================================================
