@@ -30,6 +30,7 @@ def apply_mobile_theme():
             font-size: 1.05rem;
             padding-top: 0.45rem;
             padding-bottom: 0.45rem;
+            line-height: 1.4 !important;  /* évite que le texte soit "coupé" visuellement */
         }
 
         /* Selectbox plus hautes */
@@ -37,6 +38,7 @@ def apply_mobile_theme():
             font-size: 1.05rem;
             padding-top: 0.3rem;
             padding-bottom: 0.3rem;
+            line-height: 1.4 !important;  /* évite que le texte soit "coupé" visuellement */
         }
 
         /* Sliders un peu plus “touch friendly” */
