@@ -24,19 +24,29 @@ def apply_mobile_theme():
             width: 100%;
         }
 
-        /* Inputs plus lisibles */
+        /* Inputs plus lisibles (évite le texte coupé visuellement) */
         .stTextInput > div > input,
-        .stNumberInput input {
+        .stNumberInput input,
+        .stTextArea textarea,
+        div[data-baseweb="input"] input {
             font-size: 1.05rem;
-            padding-top: 0.45rem;
-            padding-bottom: 0.45rem;
+            padding-top: 0.6rem;
+            padding-bottom: 0.6rem;
+            line-height: 1.5 !important;
         }
 
-        /* Selectbox plus hautes */
-        .stSelectbox > div > div {
+        /* Selectbox et multiselect : augmente la hauteur et la line-height du contenu */
+        .stSelectbox div[data-baseweb="select"],
+        .stMultiSelect div[data-baseweb="select"] {
+            min-height: 2.9rem;
             font-size: 1.05rem;
-            padding-top: 0.3rem;
-            padding-bottom: 0.3rem;
+        }
+
+        .stSelectbox div[data-baseweb="select"] div[role="button"],
+        .stMultiSelect div[data-baseweb="select"] div[role="button"] {
+            padding-top: 0.4rem;
+            padding-bottom: 0.4rem;
+            line-height: 1.5 !important;
         }
 
         /* Sliders un peu plus “touch friendly” */
